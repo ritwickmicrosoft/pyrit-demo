@@ -751,10 +751,10 @@ function selectTech(el) {
     const modelLabel = document.getElementById('modelLabel');
     if (selectedTech === 'multiturn') {
         atkRow.style.display = 'block';
-        modelLabel.textContent = '\ud83c\udfaf Target LLM:';
+        modelLabel.textContent = '\U0001f3af Target LLM:';
     } else {
         atkRow.style.display = 'none';
-        modelLabel.textContent = '\ud83e\udd16 Model:';
+        modelLabel.textContent = '\U0001f916 Model:';
     }
 }
 
@@ -901,7 +901,7 @@ function renderResults(results) {
                 <span class="badge ${cls}">${icon} ${r.status}</span>
             </div>
             <div class="rc-meta">
-                <span>${r.attacker_model ? '\ud83c\udfaf Target: ' + esc(r.model || 'gpt-4o') + ' | \ud83e\udde0 Attacker: ' + esc(r.attacker_model) : '\ud83e\udd16 ' + esc(r.model || 'gpt-4o')}</span>
+                <span>${r.attacker_model ? '\U0001f3af Target: ' + esc(r.model || 'gpt-4o') + ' | \U0001f9e0 Attacker: ' + esc(r.attacker_model) : '\U0001f916 ' + esc(r.model || 'gpt-4o')}</span>
                 <span>⏱️ ${r.duration_s ? r.duration_s + 's' : '...'}</span>
                 <span>🕐 ${r.timestamp}</span>
             </div>
