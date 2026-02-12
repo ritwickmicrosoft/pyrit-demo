@@ -411,6 +411,15 @@ async def run_test(request: Request):
     if technique not in TECHNIQUES:
         return JSONResponse({"error": f"Unknown technique: {technique}"}, status_code=400)
 
+    # RedTeamingAttack doesn't support multimodal models yet
+    if technique == "multiturn":
+        for mname in [model, attacker_model]:
+            if mname and "multimodal" in mname.lower():
+                return JSONResponse(
+                    {"error": f"AI vs AI does not support multimodal models ({mname}). Please choose a text-only model."},
+                    status_code=400,
+                )
+
     label, runner = TECHNIQUES[technique]
     result_counter += 1
     rid = result_counter
