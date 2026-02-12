@@ -680,6 +680,7 @@ pre { background: #0d1117; border: 1px solid var(--border); border-radius: 8px;
             <div class="tech-btn" data-tech="multiturn" onclick="selectTech(this)">🤖⚔️🤖 AI vs AI</div>
             <div class="tech-btn" data-tech="image" onclick="selectTech(this)" id="imageTechBtn">🖼️ Image+Text</div>
         </div>
+        <div id="modelWarning" style="display:none;background:#2d1216;border:1px solid var(--red);border-radius:8px;padding:0.6rem;margin:0.5rem 0;font-size:0.82rem;color:var(--red)">⚠️ AI vs AI requires text-only models. Please change the selected model.</div>
         <div class="btn-row">
             <button class="fire-btn" onclick="fireTest()" id="fireBtn">🔥 Fire!</button>
             <button class="fire-btn all" onclick="fireAll()" id="fireAllBtn">⚡ All Techniques</button>
@@ -716,8 +717,8 @@ let selectedAttackerModel = '';
         atkSel.innerHTML = opts;
         selectedModel = data.default;
         selectedAttackerModel = data.default;
-        sel.addEventListener('change', (e) => { selectedModel = e.target.value; });
-        atkSel.addEventListener('change', (e) => { selectedAttackerModel = e.target.value; });
+        sel.addEventListener('change', (e) => { selectedModel = e.target.value; checkModelCompat(); });
+        atkSel.addEventListener('change', (e) => { selectedAttackerModel = e.target.value; checkModelCompat(); });
     } catch(e) {}
 })();
 
@@ -765,11 +766,32 @@ function selectTech(el) {
         atkRow.style.display = 'none';
         modelLabel.textContent = '\U0001f916 Model:';
     }
+    checkModelCompat();
+}
+
+function isMultimodal(m) { return m && m.toLowerCase().includes('multimodal'); }
+
+function checkModelCompat() {
+    const warn = document.getElementById('modelWarning');
+    const btn = document.getElementById('fireBtn');
+    const allBtn = document.getElementById('fireAllBtn');
+    if (selectedTech === 'multiturn' && (isMultimodal(selectedModel) || isMultimodal(selectedAttackerModel))) {
+        const bad = isMultimodal(selectedModel) ? selectedModel : selectedAttackerModel;
+        warn.textContent = '\u26A0\uFE0F AI vs AI requires text-only models. ' + bad + ' is multimodal — please pick a different model.';
+        warn.style.display = 'block';
+        btn.disabled = true;
+    } else {
+        warn.style.display = 'none';
+        btn.disabled = false;
+    }
 }
 
 async function fireTest() {
     const prompt = document.getElementById('promptInput').value.trim();
     if (!prompt) { alert('Enter a prompt first!'); return; }
+    if (selectedTech === 'multiturn' && (isMultimodal(selectedModel) || isMultimodal(selectedAttackerModel))) {
+        checkModelCompat(); return;
+    }
 
     const btn = document.getElementById('fireBtn');
     btn.disabled = true; btn.textContent = '⏳ Sending...';
@@ -798,7 +820,9 @@ async function fireAll() {
     const btn = document.getElementById('fireAllBtn');
     btn.disabled = true; btn.textContent = '⏳ Firing all...';
 
-    const techs = ['direct', 'base64', 'charswap', 'scored', 'jailbreak', 'multiturn'];
+    let techs = ['direct', 'base64', 'charswap', 'scored', 'jailbreak'];
+    // Skip AI vs AI if a multimodal model is selected (not compatible)
+    if (!isMultimodal(selectedModel)) techs.push('multiturn');
     if (uploadedImagePath) techs.push('image');
     for (const t of techs) {
         try {
