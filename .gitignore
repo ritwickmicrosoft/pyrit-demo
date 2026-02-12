@@ -1,0 +1,22 @@
+# Virtual environment
+.venv/
+__pycache__/
+*.pyc
+
+# Uploads (temp files)
+uploads/*
+!uploads/.gitkeep
+
+# Generated reports
+red_team_report.html
+
+# IDE
+.vscode/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Notebook checkpoints
+.ipynb_checkpoints/
