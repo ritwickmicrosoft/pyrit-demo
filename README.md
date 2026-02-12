@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/Azure/PyRIT/main/assets/pyrit_logo.png" alt="PyRIT Logo" width="120">
-</p>
-
 <h1 align="center">🎯 PyRIT Red-Team Demo</h1>
 
 <p align="center">
