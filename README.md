@@ -38,6 +38,7 @@ This repo gives you **three ways** to red-team your AI:
 | 2 | 🕵️ **Speak in Code** | Base64 encoding | Prompt disguised as encoded text |
 | 3 | ⚖️ **The AI Judge** | Auto-scoring | Second LLM grades the response |
 | 4 | 🔓 **Jailbreak Showdown** | DAN template | Famous jailbreak vs. guardrails |
+| 5 | 🤖⚔️🤖 **AI vs AI** | Multi-turn red teaming | Attacker LLM battles target LLM over 3 turns |
 
 ### 📊 Static Report (7 Tests)
 
@@ -52,7 +53,7 @@ This repo gives you **three ways** to red-team your AI:
 
 ### ⚡ Live Dashboard Features
 
-- **6 attack techniques**: Direct, Base64, CharSwap, AI-Scored, DAN Jailbreak, Image+Text
+- **7 attack techniques**: Direct, Base64, CharSwap, AI-Scored, DAN Jailbreak, AI vs AI (Multi-Turn), Image+Text
 - **4 models**: GPT-4o, GPT-5-mini, o4-mini, Phi-4 Multimodal
 - **Image upload**: Test multimodal attacks with text + image
 - **Real-time results**: Auto-updating cards with BLOCKED/BYPASSED status
