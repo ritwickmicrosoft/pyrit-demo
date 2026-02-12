@@ -244,22 +244,6 @@ Just run `az login` before starting, and make sure your account has the **Cognit
 
 ---
 
-## 🎤 Presenting This Demo
-
-See [PRESENTER_NOTES.md](PRESENTER_NOTES.md) for a complete 10-minute talk track.
-
-**Quick flow:**
-1. **Setup** (1 min) — Run the setup cell, show green checkmarks
-2. **Direct attack** (2 min) — Model refuses, guardrails work
-3. **Base64 encoding** (2 min) — Sneaky but detectable
-4. **AI Judge** (2 min) — Automated scoring at scale
-5. **Jailbreak** (2 min) — Famous DAN template vs. safety
-6. **Live dashboard** (1 min) — Take prompts from the audience!
-
-> **Pro tip:** Ask the audience to post attack prompts in chat, then fire them live on the dashboard 🔥
-
----
-
 ## 📚 Resources
 
 - **PyRIT Documentation**: [azure.github.io/PyRIT](https://azure.github.io/PyRIT/)
