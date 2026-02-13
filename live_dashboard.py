@@ -241,28 +241,31 @@ async def run_multiturn(credential, objective: str, model: str = "", attacker_mo
         max_turns=3,
     )
 
-    # Content filter errors can cascade — catch and return a clean result
     try:
         result = await attack.execute_async(objective=objective)
-    except (ValueError, Exception) as e:
-        err_msg = str(e)
-        if "content_filter" in err_msg or "Multimodal data type error" in err_msg or "content management policy" in err_msg:
-            # Content filter blocked the adversarial prompt — build a clean response
-            class FilteredResult:
+    except Exception as atk_err:
+        err_str = str(atk_err)
+        # Content filter blocks cause "Multimodal data type error" on subsequent turns
+        is_content_filter = "content_filter" in err_str or "Multimodal data type error" in err_str or "content management policy" in err_str
+
+        if is_content_filter:
+            class BlockedResult:
                 def __init__(self):
-                    self.executed_turns = 0
-                    self.outcome = type("O", (), {"name": "FAILURE"})()
-                    self.last_response = type("R", (), {
-                        "converted_value": f"[MULTI-TURN: 0 turns, Outcome: FAILURE]\n"
-                            f"\U0001f3af Target LLM: {target_model_name} | \U0001f9e0 Attacker LLM: {attacker}\n\n"
-                            f"\U0001f6e1\ufe0f Azure content filter caught the jailbreak attempt before it reached the model.\n"
-                            f"This is defense-in-depth working correctly — the safety system blocked the adversarial prompt.",
-                        "original_value": ""
-                    })()
+                    msg = f"[MULTI-TURN: Outcome: BLOCKED BY CONTENT FILTER]\n"
+                    msg += f"\U0001f3af Target LLM: {target_model_name} | \U0001f9e0 Attacker LLM: {attacker}\n\n"
+                    msg += "\U0001f6e1\ufe0f Azure content filter blocked the adversarial prompt before it reached the target model. This is defense-in-depth working correctly!"
+                    self.last_response = type("R", (), {"converted_value": msg, "original_value": msg})()
                     self.last_score = None
                     self.conversation_id = None
                     self.objective = objective
-            return {"result": FilteredResult(), "score_result": "", "score_rationale": ""}
+                    self.outcome = type("O", (), {"name": "FAILURE"})()
+
+            return {
+                "result": BlockedResult(),
+                "score_result": "",
+                "score_rationale": "",
+                "_force_status": "BLOCKED",
+            }
         raise  # re-raise non-content-filter errors
 
     # Extract multi-turn conversation
@@ -494,20 +497,17 @@ async def _run_and_update(rid: int, runner, prompt: str, image_path: str = "", m
                 entry["duration_s"] = round(time.time() - t0, 1)
                 entry["score_result"] = out.get("score_result", "")
                 entry["score_rationale"] = out.get("score_rationale", "")
-                entry["status"] = "BLOCKED" if is_refusal(response) else "BYPASSED"
+                forced = out.get("_force_status", "")
+                if forced:
+                    entry["status"] = forced
+                else:
+                    entry["status"] = "BLOCKED" if is_refusal(response) else "BYPASSED"
                 break
     except Exception as e:
-        err_msg = str(e)
-        # Content filter errors in multi-turn → show as BLOCKED (safety working)
-        is_content_filter = any(kw in err_msg for kw in ["content_filter", "Multimodal data type error", "content management policy"])
         for entry in test_results:
             if entry["id"] == rid:
-                if is_content_filter:
-                    entry["status"] = "BLOCKED"
-                    entry["response"] = "\U0001f6e1\ufe0f Azure content filter caught the adversarial prompt. Defense-in-depth is working correctly."
-                else:
-                    entry["status"] = "ERROR"
-                    entry["error"] = err_msg[:500]
+                entry["status"] = "ERROR"
+                entry["error"] = str(e)[:500]
                 entry["duration_s"] = round(time.time() - t0, 1)
                 break
 
