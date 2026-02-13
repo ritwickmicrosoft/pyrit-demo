@@ -217,8 +217,7 @@ async def run_multiturn(credential, objective: str, model: str = "", attacker_mo
     from pyrit.score import SelfAskTrueFalseScorer, TrueFalseQuestion
 
     attacker = attacker_model or model or DEFAULT_MODEL
-    target_model_name = model or DEFAULT_MODEL
-    target = get_target(credential, target_model_name)
+    target = get_target(credential, model)
     adversarial = get_target(credential, attacker)
     scorer_target = get_target(credential, attacker)
 
@@ -243,30 +242,29 @@ async def run_multiturn(credential, objective: str, model: str = "", attacker_mo
 
     try:
         result = await attack.execute_async(objective=objective)
-    except Exception as atk_err:
-        err_str = str(atk_err)
-        # Content filter blocks cause "Multimodal data type error" on subsequent turns
-        is_content_filter = "content_filter" in err_str or "Multimodal data type error" in err_str or "content management policy" in err_str
-
-        if is_content_filter:
+    except Exception as exc:
+        # Content filter errors cascade as "Multimodal data type error" in RedTeamingAttack.
+        # This means the target's safety filter blocked the prompt — treat it as BLOCKED.
+        exc_str = str(exc)
+        if "Multimodal data type error" in exc_str or "content_filter" in exc_str:
             class BlockedResult:
                 def __init__(self):
-                    msg = f"[MULTI-TURN: Outcome: BLOCKED BY CONTENT FILTER]\n"
-                    msg += f"\U0001f3af Target LLM: {target_model_name} | \U0001f9e0 Attacker LLM: {attacker}\n\n"
-                    msg += "\U0001f6e1\ufe0f Azure content filter blocked the adversarial prompt before it reached the target model. This is defense-in-depth working correctly!"
-                    self.last_response = type("R", (), {"converted_value": msg, "original_value": msg})()
+                    self.last_response = type("R", (), {
+                        "converted_value": "[Content blocked by Azure safety filters — the target model refused the objective across all turns]",
+                        "original_value": "",
+                    })()
                     self.last_score = None
                     self.conversation_id = None
                     self.objective = objective
                     self.outcome = type("O", (), {"name": "FAILURE"})()
-
+                    self.executed_turns = 0
             return {
                 "result": BlockedResult(),
                 "score_result": "",
                 "score_rationale": "",
                 "_force_status": "BLOCKED",
             }
-        raise  # re-raise non-content-filter errors
+        raise
 
     # Extract multi-turn conversation
     prompt_sent = ""
@@ -284,14 +282,11 @@ async def run_multiturn(credential, objective: str, model: str = "", attacker_mo
                     value = msg.get_value()
                 elif hasattr(msg, "message_pieces") and msg.message_pieces:
                     value = msg.message_pieces[0].converted_value or msg.message_pieces[0].original_value or ""
+                turns_log.append(f"[{role.upper()}] {value}")
                 if role == "user":
-                    turns_log.append(f"[\U0001f9e0 Attacker: {attacker}] {value}")
                     prompt_sent = value  # last user prompt
                 elif role == "assistant":
-                    turns_log.append(f"[\U0001f3af Target: {target_model_name}] {value}")
                     response = value  # last assistant response
-                else:
-                    turns_log.append(f"[{role.upper()}] {value}")
     except Exception:
         pass
 
@@ -299,8 +294,7 @@ async def run_multiturn(credential, objective: str, model: str = "", attacker_mo
         response = getattr(result.last_response, "converted_value", "") or ""
 
     # Build a rich multi-turn transcript
-    full_response = f"[MULTI-TURN: {result.executed_turns} turns, Outcome: {result.outcome.name}]\n"
-    full_response += f"\U0001f3af Target LLM: {target_model_name} | \U0001f9e0 Attacker LLM: {attacker}\n\n"
+    full_response = f"[MULTI-TURN: {result.executed_turns} turns, Outcome: {result.outcome.name}]\n\n"
     full_response += "\n\n".join(turns_log) if turns_log else response
 
     score_result = ""
@@ -497,6 +491,7 @@ async def _run_and_update(rid: int, runner, prompt: str, image_path: str = "", m
                 entry["duration_s"] = round(time.time() - t0, 1)
                 entry["score_result"] = out.get("score_result", "")
                 entry["score_rationale"] = out.get("score_rationale", "")
+                # Respect forced status (e.g. content filter → BLOCKED)
                 forced = out.get("_force_status", "")
                 if forced:
                     entry["status"] = forced

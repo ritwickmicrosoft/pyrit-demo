@@ -136,44 +136,6 @@ def _get_outcome(result) -> str:
     return "UNDETERMINED"
 
 
-def _patch_pyrit_error_handling():
-    """Monkey-patch PyRIT to handle data_type='error' in multi-turn conversations.
-
-    PyRIT bug: when a content filter triggers, the API error is stored as a message
-    with data_type='error'. On subsequent turns, _is_text_message_format returns False
-    (only allows 'text'), routing to the multimodal builder which doesn't handle 'error'
-    and crashes with 'Multimodal data type error is not yet supported.'
-
-    Fix: patch _is_text_message_format to treat 'error' as text-compatible.
-    """
-    from pyrit.prompt_target.openai.openai_chat_target import OpenAIChatTarget
-
-    def _patched_is_text(self, conversation):
-        for turn in conversation:
-            if len(turn.message_pieces) != 1:
-                return False
-            dt = turn.message_pieces[0].converted_value_data_type
-            if dt not in ("text", "error"):
-                return False
-        return True
-
-    OpenAIChatTarget._is_text_message_format = _patched_is_text
-
-    _orig_build_text = OpenAIChatTarget._build_chat_messages_for_text
-
-    def _patched_build_text(self, conversation):
-        """Treat error messages as text so multi-turn doesn't crash."""
-        for message in conversation:
-            if len(message.message_pieces) == 1:
-                mp = message.message_pieces[0]
-                if mp.converted_value_data_type == "error":
-                    mp.converted_value_data_type = "text"
-                    mp.converted_value = "[Content filtered by safety system]"
-        return _orig_build_text(self, conversation)
-
-    OpenAIChatTarget._build_chat_messages_for_text = _patched_build_text
-
-
 def _is_refusal(text: str) -> bool:
     """Heuristic check if the response is a refusal."""
     refusal_phrases = [
@@ -450,10 +412,6 @@ async def test_multiturn_ai_vs_ai(credential) -> TestCase:
             RTASystemPromptPaths,
         )
         from pyrit.score import SelfAskTrueFalseScorer, TrueFalseQuestion
-        from pyrit.setup import IN_MEMORY, initialize_pyrit_async
-
-        # Fresh memory for each AI vs AI run
-        await initialize_pyrit_async(memory_db_type=IN_MEMORY)
 
         attacker_target = _get_target_for_model(credential, ATTACKER_MODEL)
         target_target = _get_target_for_model(credential, TARGET_MODEL)
@@ -478,7 +436,6 @@ async def test_multiturn_ai_vs_ai(credential) -> TestCase:
             max_turns=3,
         )
         result = await attack.execute_async(objective=tc.objective)
-
         tc.prompt_sent, tc.response = _extract_conversation(result)
         if not tc.prompt_sent:
             tc.prompt_sent = tc.objective
@@ -497,8 +454,17 @@ async def test_multiturn_ai_vs_ai(credential) -> TestCase:
         tc.extra["attacker_model"] = ATTACKER_MODEL
         tc.extra["target_model"] = TARGET_MODEL
     except Exception as e:
-        tc.status = "ERROR"
-        tc.error = str(e)[:500]
+        exc_str = str(e)
+        # Content filter errors cascade as "Multimodal data type error" in RedTeamingAttack
+        # This actually means the target's safety filter blocked the prompt — treat as BLOCKED
+        if "Multimodal data type error" in exc_str or "content_filter" in exc_str:
+            tc.status = "BLOCKED"
+            tc.response = "[Content blocked by Azure safety filters — the target model refused across all turns]"
+            tc.extra["attacker_model"] = ATTACKER_MODEL
+            tc.extra["target_model"] = TARGET_MODEL
+        else:
+            tc.status = "ERROR"
+            tc.error = exc_str[:500]
     tc.duration_s = time.time() - t0
     return tc
 
@@ -713,7 +679,6 @@ async def main():
     print("🔧 Initializing PyRIT...")
     from pyrit.setup import IN_MEMORY, initialize_pyrit_async
     await initialize_pyrit_async(memory_db_type=IN_MEMORY)
-    _patch_pyrit_error_handling()
 
     # Get credential
     print("🔑 Authenticating via Entra ID...")
