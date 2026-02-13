@@ -114,8 +114,7 @@ def _patch_pyrit_error_handling():
                 mp = message.message_pieces[0]
                 if mp.converted_value_data_type == "error":
                     mp.converted_value_data_type = "text"
-                    if not mp.converted_value:
-                        mp.converted_value = "[Content filtered by safety system]"
+                    mp.converted_value = "[Content filtered by safety system]"
         return _orig_build_text(self, conversation)
 
     OpenAIChatTarget._build_chat_messages_for_text = _patched_build_text
