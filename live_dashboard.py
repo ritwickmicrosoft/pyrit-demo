@@ -74,50 +74,11 @@ async def ensure_initialized():
     if not _pyrit_initialized:
         from pyrit.setup import IN_MEMORY, initialize_pyrit_async
         await initialize_pyrit_async(memory_db_type=IN_MEMORY)
-        _patch_pyrit_error_handling()
         _pyrit_initialized = True
     if _credential is None:
         from azure.identity import DefaultAzureCredential
         _credential = DefaultAzureCredential()
     return _credential
-
-
-def _patch_pyrit_error_handling():
-    """Monkey-patch PyRIT to handle data_type='error' in multi-turn conversations.
-
-    PyRIT bug: when a content filter triggers, the API error is stored as a message
-    with data_type='error'. On subsequent turns, _is_text_message_format returns False
-    (only allows 'text'), routing to the multimodal builder which doesn't handle 'error'
-    and crashes with 'Multimodal data type error is not yet supported.'
-
-    Fix: patch both methods so 'error' is treated like text.
-    """
-    from pyrit.prompt_target.openai.openai_chat_target import OpenAIChatTarget
-
-    def _patched_is_text(self, conversation):
-        for turn in conversation:
-            if len(turn.message_pieces) != 1:
-                return False
-            dt = turn.message_pieces[0].converted_value_data_type
-            if dt not in ("text", "error"):
-                return False
-        return True
-
-    OpenAIChatTarget._is_text_message_format = _patched_is_text
-
-    _orig_build_text = OpenAIChatTarget._build_chat_messages_for_text
-
-    def _patched_build_text(self, conversation):
-        """Treat error messages as text so multi-turn doesn't crash."""
-        for message in conversation:
-            if len(message.message_pieces) == 1:
-                mp = message.message_pieces[0]
-                if mp.converted_value_data_type == "error":
-                    mp.converted_value_data_type = "text"
-                    mp.converted_value = "[Content filtered by safety system]"
-        return _orig_build_text(self, conversation)
-
-    OpenAIChatTarget._build_chat_messages_for_text = _patched_build_text
 
 
 def get_target(credential, model: str = ""):
@@ -254,13 +215,10 @@ async def run_multiturn(credential, objective: str, model: str = "", attacker_mo
         RTASystemPromptPaths,
     )
     from pyrit.score import SelfAskTrueFalseScorer, TrueFalseQuestion
-    from pyrit.setup import IN_MEMORY, initialize_pyrit_async
-
-    # Fresh memory for each AI vs AI run
-    await initialize_pyrit_async(memory_db_type=IN_MEMORY)
 
     attacker = attacker_model or model or DEFAULT_MODEL
-    target = get_target(credential, model)
+    target_model_name = model or DEFAULT_MODEL
+    target = get_target(credential, target_model_name)
     adversarial = get_target(credential, attacker)
     scorer_target = get_target(credential, attacker)
 
@@ -300,11 +258,14 @@ async def run_multiturn(credential, objective: str, model: str = "", attacker_mo
                     value = msg.get_value()
                 elif hasattr(msg, "message_pieces") and msg.message_pieces:
                     value = msg.message_pieces[0].converted_value or msg.message_pieces[0].original_value or ""
-                turns_log.append(f"[{role.upper()}] {value}")
                 if role == "user":
+                    turns_log.append(f"[\U0001f9e0 Attacker: {attacker}] {value}")
                     prompt_sent = value  # last user prompt
                 elif role == "assistant":
+                    turns_log.append(f"[\U0001f3af Target: {target_model_name}] {value}")
                     response = value  # last assistant response
+                else:
+                    turns_log.append(f"[{role.upper()}] {value}")
     except Exception:
         pass
 
@@ -312,7 +273,8 @@ async def run_multiturn(credential, objective: str, model: str = "", attacker_mo
         response = getattr(result.last_response, "converted_value", "") or ""
 
     # Build a rich multi-turn transcript
-    full_response = f"[MULTI-TURN: {result.executed_turns} turns, Outcome: {result.outcome.name}]\n\n"
+    full_response = f"[MULTI-TURN: {result.executed_turns} turns, Outcome: {result.outcome.name}]\n"
+    full_response += f"\U0001f3af Target LLM: {target_model_name} | \U0001f9e0 Attacker LLM: {attacker}\n\n"
     full_response += "\n\n".join(turns_log) if turns_log else response
 
     score_result = ""
