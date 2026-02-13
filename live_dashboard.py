@@ -263,13 +263,17 @@ async def run_multiturn(credential, objective: str, model: str = "", attacker_mo
                 "score_result": "",
                 "score_rationale": "",
                 "_force_status": "BLOCKED",
+                "turns": [{"role": "system", "content": "Content blocked by Azure safety filters \u2014 the target model refused the objective across all turns"}],
+                "executed_turns": 0,
+                "outcome": "FAILURE",
             }
         raise
 
     # Extract multi-turn conversation
     prompt_sent = ""
     response = ""
-    turns_log = []
+    turns_log = []  # flat strings for legacy
+    turns = []  # structured: [{"role": "attacker"|"target", "content": "..."}]
     try:
         if hasattr(result, "conversation_id") and result.conversation_id:
             from pyrit.memory import CentralMemory
@@ -283,6 +287,8 @@ async def run_multiturn(credential, objective: str, model: str = "", attacker_mo
                 elif hasattr(msg, "message_pieces") and msg.message_pieces:
                     value = msg.message_pieces[0].converted_value or msg.message_pieces[0].original_value or ""
                 turns_log.append(f"[{role.upper()}] {value}")
+                # Map: user messages = attacker probing, assistant messages = target responding
+                turns.append({"role": "attacker" if role == "user" else "target", "content": value})
                 if role == "user":
                     prompt_sent = value  # last user prompt
                 elif role == "assistant":
@@ -319,6 +325,9 @@ async def run_multiturn(credential, objective: str, model: str = "", attacker_mo
         "result": MultiTurnResult(),
         "score_result": score_result,
         "score_rationale": score_rationale,
+        "turns": turns,
+        "executed_turns": result.executed_turns,
+        "outcome": result.outcome.name,
     }
 
 
@@ -461,6 +470,7 @@ async def run_test(request: Request):
         "error": "", "timestamp": datetime.now().strftime("%H:%M:%S"),
         "image_url": image_url, "model": model,
         "attacker_model": attacker_model if technique == "multiturn" else "",
+        "turns": [], "executed_turns": 0, "outcome": "",
     }
     test_results.insert(0, entry)
 
@@ -491,6 +501,9 @@ async def _run_and_update(rid: int, runner, prompt: str, image_path: str = "", m
                 entry["duration_s"] = round(time.time() - t0, 1)
                 entry["score_result"] = out.get("score_result", "")
                 entry["score_rationale"] = out.get("score_rationale", "")
+                entry["turns"] = out.get("turns", [])
+                entry["executed_turns"] = out.get("executed_turns", 0)
+                entry["outcome"] = out.get("outcome", "")
                 # Respect forced status (e.g. content filter → BLOCKED)
                 forced = out.get("_force_status", "")
                 if forced:
@@ -650,6 +663,26 @@ pre { background: #0d1117; border: 1px solid var(--border); border-radius: 8px;
               cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .result-image { margin: 0.5rem 0; }
 .result-image img { max-width: 200px; max-height: 150px; border-radius: 8px; border: 1px solid var(--border); }
+
+/* AI vs AI Chat conversation */
+.chat-log { display: flex; flex-direction: column; gap: 0.6rem; max-height: 400px; overflow-y: auto;
+            padding: 0.8rem; background: #0d1117; border: 1px solid var(--border); border-radius: 8px; }
+.chat-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem; }
+.chat-meta .turn-num { font-size: 0.7rem; color: var(--muted); }
+.chat-bubble { padding: 0.7rem 1rem; border-radius: 12px; font-size: 0.82rem;
+               max-width: 85%; word-wrap: break-word; white-space: pre-wrap; line-height: 1.4; position: relative; }
+.chat-bubble .chat-role { font-size: 0.7rem; font-weight: 700; margin-bottom: 0.3rem; display: block; }
+.chat-bubble.attacker { background: #1a1a3e; border: 1px solid var(--purple); align-self: flex-start;
+                         border-bottom-left-radius: 4px; }
+.chat-bubble.attacker .chat-role { color: var(--purple); }
+.chat-bubble.target { background: #0d2818; border: 1px solid var(--green); align-self: flex-end;
+                       border-bottom-right-radius: 4px; }
+.chat-bubble.target .chat-role { color: var(--green); }
+.chat-bubble.system { background: #2d2008; border: 1px solid var(--yellow); align-self: center;
+                       text-align: center; max-width: 95%; }
+.chat-bubble.system .chat-role { color: var(--yellow); }
+.chat-summary { display: flex; gap: 1rem; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.4rem;
+                padding: 0.4rem 0.8rem; background: var(--bg); border-radius: 8px; border: 1px solid var(--border); }
 </style>
 </head>
 <body>
@@ -933,6 +966,31 @@ function renderSidebar(results) {
     }).join('');
 }
 
+function renderChatLog(r) {
+    const roleLabel = {attacker: '\U0001f9e0 Attacker', target: '\U0001f3af Target', system: '\u26a0\ufe0f System'};
+    const turnCount = r.executed_turns || Math.ceil(r.turns.length / 2);
+    const outcome = r.outcome || '';
+    const summaryHtml = `<div class="chat-summary">
+        <span>\u2694\ufe0f <strong>AI vs AI Battle</strong></span>
+        <span>Turns: <strong>${turnCount}</strong></span>
+        ${outcome ? `<span>Outcome: <strong>${outcome}</strong></span>` : ''}
+    </div>`;
+    const bubblesHtml = r.turns.map((t, i) => {
+        const role = t.role || 'target';
+        const label = roleLabel[role] || role;
+        const turnNum = role === 'attacker' ? Math.floor(i/2) + 1 : '';
+        return `<div class="chat-bubble ${esc(role)}">
+            <span class="chat-role">${label}${turnNum ? ' (Turn ' + turnNum + ')' : ''}</span>
+            ${esc(t.content)}
+        </div>`;
+    }).join('');
+    return `<div class="rc-section">
+        <h4>\U0001f4ac AI vs AI Conversation</h4>
+        ${summaryHtml}
+        <div class="chat-log">${bubblesHtml}</div>
+    </div>`;
+}
+
 function renderResults(results) {
     const el = document.getElementById('resultsArea');
     if (!results.length) {
@@ -954,9 +1012,11 @@ function renderResults(results) {
             errorHtml = `<div class="error-box">⚠️ ${esc(r.error)}</div>`;
         }
 
-        const responseHtml = r.response
-            ? `<div class="rc-section"><h4>📥 Model Response</h4><pre>${esc(r.response)}</pre></div>`
-            : (r.status === 'RUNNING' ? '' : '<div class="rc-section"><h4>📥 Model Response</h4><pre style="color:var(--muted)">No response captured</pre></div>');
+        const responseHtml = r.turns && r.turns.length > 0
+            ? renderChatLog(r)
+            : r.response
+                ? `<div class="rc-section"><h4>📥 Model Response</h4><pre>${esc(r.response)}</pre></div>`
+                : (r.status === 'RUNNING' ? '' : '<div class="rc-section"><h4>📥 Model Response</h4><pre style="color:var(--muted)">No response captured</pre></div>');
 
         return `<div class="result-card ${cls}" id="card-${r.id}">
             <div class="rc-header">
