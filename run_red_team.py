@@ -35,12 +35,13 @@ MODEL = "gpt-4o"
 TARGET_MODEL = "gpt-4o"          # the model under test
 ATTACKER_MODEL = "gpt-5-mini"    # the adversarial attacker LLM
 
-# Model → endpoint mapping
-MODEL_ENDPOINTS = {
-    "gpt-4o": AOAI_ENDPOINT,
-    "o4-mini": AOAI_ENDPOINT,
-    "gpt-5-mini": AOAI_ENDPOINT,
-    "Phi-4-multimodal": FOUNDRY_ENDPOINT,
+# Model → (endpoint, uses_responses_api) mapping
+# Reasoning models (gpt-5-mini, o4-mini) need OpenAIResponseTarget
+MODEL_CONFIG = {
+    "gpt-4o":           (AOAI_ENDPOINT,    False),
+    "o4-mini":          (AOAI_ENDPOINT,    True),
+    "gpt-5-mini":       (AOAI_ENDPOINT,    True),
+    "Phi-4-multimodal": (FOUNDRY_ENDPOINT, False),
 }
 
 REPORT_FILE = Path(__file__).parent / "red_team_report.html"
@@ -79,10 +80,14 @@ def _get_target(credential):
 
 
 def _get_target_for_model(credential, model: str):
-    """Create a target for a specific model, auto-routing to the correct endpoint."""
-    from pyrit.prompt_target import OpenAIChatTarget
+    """Create a target for a specific model, auto-routing to the correct endpoint.
+    Uses OpenAIResponseTarget for reasoning models (gpt-5-mini, o4-mini)."""
+    from pyrit.prompt_target import OpenAIChatTarget, OpenAIResponseTarget
     token = credential.get_token("https://cognitiveservices.azure.com/.default").token
-    endpoint = MODEL_ENDPOINTS.get(model, AOAI_ENDPOINT)
+    config = MODEL_CONFIG.get(model, (AOAI_ENDPOINT, False))
+    endpoint, uses_responses = config
+    if uses_responses:
+        return OpenAIResponseTarget(endpoint=endpoint, api_key=token, model_name=model)
     return OpenAIChatTarget(endpoint=endpoint, api_key=token, model_name=model)
 
 
@@ -454,17 +459,8 @@ async def test_multiturn_ai_vs_ai(credential) -> TestCase:
         tc.extra["attacker_model"] = ATTACKER_MODEL
         tc.extra["target_model"] = TARGET_MODEL
     except Exception as e:
-        exc_str = str(e)
-        # Content filter errors cascade as "Multimodal data type error" in RedTeamingAttack
-        # This actually means the target's safety filter blocked the prompt — treat as BLOCKED
-        if "Multimodal data type error" in exc_str or "content_filter" in exc_str:
-            tc.status = "BLOCKED"
-            tc.response = "[Content blocked by Azure safety filters — the target model refused across all turns]"
-            tc.extra["attacker_model"] = ATTACKER_MODEL
-            tc.extra["target_model"] = TARGET_MODEL
-        else:
-            tc.status = "ERROR"
-            tc.error = exc_str[:500]
+        tc.status = "ERROR"
+        tc.error = str(e)[:500]
     tc.duration_s = time.time() - t0
     return tc
 
