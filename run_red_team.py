@@ -131,6 +131,128 @@ def _extract_conversation(result) -> tuple[str, str]:
     return prompt_sent, response
 
 
+def _message_to_display_text(msg) -> str:
+    """Best-effort conversion of a PyRIT Message to displayable text."""
+    parts: list[str] = []
+    try:
+        pieces = getattr(msg, "message_pieces", None)
+        if pieces:
+            for piece in pieces:
+                dtype = getattr(piece, "original_value_data_type", None) or getattr(piece, "converted_value_data_type", None)
+                if dtype in {"reasoning", "function_call", "tool_call", "function_call_output"}:
+                    continue
+                txt = getattr(piece, "converted_value", None) or getattr(piece, "original_value", None) or ""
+                if txt:
+                    parts.append(str(txt))
+        else:
+            v = msg.get_value() if hasattr(msg, "get_value") else ""
+            if v:
+                parts.append(str(v))
+    except Exception:
+        return ""
+    return "\n".join([p for p in parts if p]).strip()
+
+
+def _format_objective_target_turns(*, messages, attacker_model: str, target_model: str, objective: str) -> str:
+    """Format the *objective target* conversation as turn-tagged attacker→target exchanges."""
+    lines: list[str] = []
+    lines.append(f"Objective (you): {objective}")
+    lines.append(f"Attacker model: {attacker_model} | Target model: {target_model}")
+    lines.append("")
+
+    turn = 0
+    pending_attacker_prompt: str | None = None
+    for msg in messages:
+        role = (getattr(msg, "api_role", "") or "").lower().strip()
+        if role not in {"user", "assistant"}:
+            continue
+        text = _message_to_display_text(msg)
+        if not text:
+            continue
+
+        if role == "user":
+            turn += 1
+            pending_attacker_prompt = text
+            lines.append(f"Turn {turn}")
+            lines.append(f"User (attacker): {text}")
+        else:
+            lines.append(f"Assistant (target): {text}")
+            lines.append("")
+
+    # trim trailing blanks
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return "\n".join(lines)
+
+
+def _format_adversarial_chat(*, messages, attacker_model: str) -> str:
+    """Format the adversarial-chat conversation (attacker model's own chat thread)."""
+    lines: list[str] = []
+    lines.append(f"Adversarial-chat conversation (attacker model: {attacker_model})")
+    lines.append("")
+    for msg in messages:
+        role = (getattr(msg, "api_role", "") or "").lower().strip()
+        if role not in {"user", "assistant", "system"}:
+            continue
+        text = _message_to_display_text(msg)
+        if not text:
+            continue
+        if role == "user":
+            lines.append(f"[USER→ATTACKER] {text}")
+        elif role == "assistant":
+            lines.append(f"[ATTACKER→USER] {text}")
+        else:
+            lines.append(f"[SYSTEM] {text}")
+    return "\n".join(lines)
+
+
+def _extract_ai_vs_ai_transcript(*, result, objective: str, attacker_model: str, target_model: str) -> tuple[str, dict]:
+    """Extract both the objective-target and adversarial-chat conversations for AI-vs-AI."""
+    extra: dict = {}
+    try:
+        from pyrit.memory import CentralMemory
+        from pyrit.models import ConversationType
+
+        memory = CentralMemory.get_memory_instance()
+
+        # 1) Objective target conversation (attacker-generated user messages -> target assistant)
+        obj_conv_id = getattr(result, "conversation_id", "")
+        extra["objective_target_conversation_id"] = obj_conv_id
+        obj_messages = list(memory.get_conversation(conversation_id=obj_conv_id)) if obj_conv_id else []
+        obj_text = _format_objective_target_turns(
+            messages=obj_messages,
+            attacker_model=attacker_model,
+            target_model=target_model,
+            objective=objective,
+        )
+
+        # 2) Adversarial chat conversation (attacker model's own thread)
+        adv_conv_id = ""
+        try:
+            refs = getattr(result, "related_conversations", None)
+            if refs:
+                for ref in refs:
+                    if getattr(ref, "conversation_type", None) == ConversationType.ADVERSARIAL:
+                        adv_conv_id = getattr(ref, "conversation_id", "")
+                        break
+        except Exception:
+            adv_conv_id = ""
+
+        extra["adversarial_chat_conversation_id"] = adv_conv_id
+        adv_messages = list(memory.get_conversation(conversation_id=adv_conv_id)) if adv_conv_id else []
+        adv_text = _format_adversarial_chat(messages=adv_messages, attacker_model=attacker_model) if adv_messages else ""
+
+        # Combine
+        combined = "[AI vs AI Multi-Turn Transcript]\n\n" + obj_text
+        if adv_text:
+            combined += "\n\n" + ("-" * 60) + "\n\n" + adv_text
+        return combined, extra
+    except Exception:
+        # Fall back to the simple extraction
+        prompt_sent, response = _extract_conversation(result)
+        return response or prompt_sent or "", extra
+
+
 def _get_outcome(result) -> str:
     """Get outcome from AttackResult (SUCCESS/FAILURE/UNDETERMINED)."""
     try:
@@ -445,9 +567,14 @@ async def test_multiturn_ai_vs_ai(credential) -> TestCase:
             max_turns=3,
         )
         result = await attack.execute_async(objective=tc.objective)
-        tc.prompt_sent, tc.response = _extract_conversation(result)
-        if not tc.prompt_sent:
-            tc.prompt_sent = tc.objective
+        transcript, transcript_extra = _extract_ai_vs_ai_transcript(
+            result=result,
+            objective=tc.objective,
+            attacker_model=ATTACKER_MODEL,
+            target_model=TARGET_MODEL,
+        )
+        tc.response = transcript
+        tc.prompt_sent = tc.objective
 
         # Extract score
         try:
@@ -462,6 +589,7 @@ async def test_multiturn_ai_vs_ai(credential) -> TestCase:
         tc.status = "BYPASSED" if outcome == "SUCCESS" else "BLOCKED"
         tc.extra["attacker_model"] = ATTACKER_MODEL
         tc.extra["target_model"] = TARGET_MODEL
+        tc.extra.update(transcript_extra)
     except Exception as e:
         tc.status = "ERROR"
         tc.error = str(e)[:500]
@@ -496,7 +624,8 @@ def generate_html_report(results: list[TestCase], total_time: float) -> str:
             <td>{tc.duration_s:.1f}s</td>
         </tr>"""
 
-        response_html = html.escape(tc.response[:1500]) if tc.response else "<em>No response captured</em>"
+        preview_len = 4000 if tc.category == "Multi-Turn" else 1500
+        response_html = html.escape(tc.response[:preview_len]) if tc.response else "<em>No response captured</em>"
         prompt_html = html.escape(tc.prompt_sent[:500]) if tc.prompt_sent else html.escape(tc.objective)
         error_html = f'<div class="error-box">⚠️ {html.escape(tc.error[:500])}</div>' if tc.error else ""
         score_html = ""
