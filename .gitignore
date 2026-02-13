@@ -20,6 +20,3 @@ Thumbs.db
 
 # Notebook checkpoints
 .ipynb_checkpoints/
-
-# Presenter notes (local only)
-PRESENTER_NOTES.md

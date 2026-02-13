@@ -33,7 +33,7 @@ MODEL = "gpt-4o"
 
 # AI vs AI (T8): separate attacker & target models
 TARGET_MODEL = "gpt-4o"          # the model under test
-ATTACKER_MODEL = "gpt-4o"        # attacker LLM (must be non-reasoning; reasoning models break multi-turn pipeline)
+ATTACKER_MODEL = "gpt-4o"        # the adversarial attacker LLM (default for demo stability)
 
 # Model → (endpoint, uses_responses_api) mapping
 # Reasoning models (gpt-5-mini, o4-mini) need OpenAIResponseTarget
@@ -414,17 +414,21 @@ async def test_multiturn_ai_vs_ai(credential) -> TestCase:
             AttackAdversarialConfig,
             AttackScoringConfig,
             RedTeamingAttack,
-            RTASystemPromptPaths,
         )
         from pyrit.score import SelfAskTrueFalseScorer, TrueFalseQuestion
 
         attacker_target = _get_target_for_model(credential, ATTACKER_MODEL)
         target_target = _get_target_for_model(credential, TARGET_MODEL)
-        scorer_target = _get_target_for_model(credential, ATTACKER_MODEL)
+        scorer_model = ATTACKER_MODEL
+        if MODEL_CONFIG.get(ATTACKER_MODEL, (AOAI_ENDPOINT, False))[1]:
+            scorer_model = "gpt-4o"
+        scorer_target = _get_target_for_model(credential, scorer_model)
 
         adversarial_config = AttackAdversarialConfig(
             target=attacker_target,
-            system_prompt_path=RTASystemPromptPaths.TEXT_GENERATION.value,
+            # Use the safer attacker prompt shipped with this demo to reduce
+            # content-filter false positives from jailbreak-y wording.
+            system_prompt_path=str((Path(__file__).parent / "rta_safe.yaml").resolve()),
         )
         scoring_config = AttackScoringConfig(
             objective_scorer=SelfAskTrueFalseScorer(

@@ -22,8 +22,8 @@ This repo gives you **three ways** to red-team your AI:
 
 | Tool | What it does | How to run |
 |------|-------------|------------|
-| 📓 **Interactive Notebook** | Walk through 4 attack demos step-by-step | `PyRIT_Demo.ipynb` |
-| 📊 **Static HTML Report** | Run 7 automated tests → beautiful HTML report | `python run_red_team.py` |
+| 📓 **Interactive Notebook** | Walk through 5 attack demos step-by-step | `PyRIT_Demo.ipynb` |
+| 📊 **Static HTML Report** | Run 8 automated tests → beautiful HTML report | `python run_red_team.py` |
 | ⚡ **Live Dashboard** | Real-time web app to fire attacks interactively | `python live_dashboard.py` |
 
 ---
@@ -40,7 +40,7 @@ This repo gives you **three ways** to red-team your AI:
 | 4 | 🔓 **Jailbreak Showdown** | DAN template | Famous jailbreak vs. guardrails |
 | 5 | 🤖⚔️🤖 **AI vs AI** | Multi-turn red teaming | Attacker LLM battles target LLM over 3 turns |
 
-### 📊 Static Report (7 Tests)
+### 📊 Static Report (8 Tests)
 
 | Test | Technique |
 |------|-----------|
@@ -50,6 +50,7 @@ This repo gives you **three ways** to red-team your AI:
 | T4 | AI-scored evaluation |
 | T5-T6 | DAN jailbreak (2 prompts) |
 | T7 | Refusal detection |
+| T8 | AI vs AI (multi-turn red teaming) |
 
 ### ⚡ Live Dashboard Features
 
@@ -189,7 +190,7 @@ Open **http://localhost:8765** — type prompts, pick models, fire attacks, watc
 ```
 pyrit-demo/
 ├── PyRIT_Demo.ipynb      # 📓 Interactive notebook (4 demos)
-├── run_red_team.py       # 📊 Static HTML report generator (7 tests)
+├── run_red_team.py       # 📊 Static HTML report generator (8 tests)
 ├── live_dashboard.py     # ⚡ Live web dashboard (FastAPI + uvicorn)
 ├── PRESENTER_NOTES.md    # 🎤 10-minute talk track
 ├── uploads/              # 📎 Temp storage for image uploads
