@@ -418,12 +418,22 @@ async def run_test(request: Request):
     if technique not in TECHNIQUES:
         return JSONResponse({"error": f"Unknown technique: {technique}"}, status_code=400)
 
-    # RedTeamingAttack doesn't support multimodal models yet
+    # RedTeamingAttack pipeline replays conversation history between turns.
+    # Multimodal models aren't supported.  Reasoning models (gpt-5-mini, o4-mini)
+    # inject reasoning/error tokens that break the pipeline.
     if technique == "multiturn":
         for mname in [model, attacker_model]:
             if mname and "multimodal" in mname.lower():
                 return JSONResponse(
                     {"error": f"AI vs AI does not support multimodal models ({mname}). Please choose a text-only model."},
+                    status_code=400,
+                )
+        # Reasoning models can't be attackers — their reasoning tokens break adversarial_chat
+        if attacker_model:
+            atk_config = MODEL_CONFIG.get(attacker_model)
+            if atk_config and atk_config[3]:  # uses_responses_api == True means reasoning model
+                return JSONResponse(
+                    {"error": f"Reasoning models ({attacker_model}) can't be used as attackers in AI vs AI — their reasoning tokens break the multi-turn pipeline. Use gpt-4o as the attacker instead."},
                     status_code=400,
                 )
 
@@ -777,6 +787,7 @@ function selectTech(el) {
 }
 
 function isMultimodal(m) { return m && m.toLowerCase().includes('multimodal'); }
+function isReasoning(m) { return m && (m.includes('gpt-5') || m.includes('o4-') || m.includes('o3-') || m.includes('o1-')); }
 
 function checkModelCompat() {
     const warn = document.getElementById('modelWarning');
@@ -784,7 +795,11 @@ function checkModelCompat() {
     const allBtn = document.getElementById('fireAllBtn');
     if (selectedTech === 'multiturn' && (isMultimodal(selectedModel) || isMultimodal(selectedAttackerModel))) {
         const bad = isMultimodal(selectedModel) ? selectedModel : selectedAttackerModel;
-        warn.textContent = '\u26A0\uFE0F AI vs AI requires text-only models. ' + bad + ' is multimodal — please pick a different model.';
+        warn.textContent = '\u26A0\uFE0F AI vs AI requires text-only models. ' + bad + ' is multimodal \u2014 please pick a different model.';
+        warn.style.display = 'block';
+        btn.disabled = true;
+    } else if (selectedTech === 'multiturn' && isReasoning(selectedAttackerModel)) {
+        warn.textContent = '\u26A0\uFE0F Reasoning models (' + selectedAttackerModel + ') can\'t be attackers \u2014 their reasoning tokens break the multi-turn pipeline. Use gpt-4o as the attacker.';
         warn.style.display = 'block';
         btn.disabled = true;
     } else {
@@ -796,7 +811,7 @@ function checkModelCompat() {
 async function fireTest() {
     const prompt = document.getElementById('promptInput').value.trim();
     if (!prompt) { alert('Enter a prompt first!'); return; }
-    if (selectedTech === 'multiturn' && (isMultimodal(selectedModel) || isMultimodal(selectedAttackerModel))) {
+    if (selectedTech === 'multiturn' && (isMultimodal(selectedModel) || isMultimodal(selectedAttackerModel) || isReasoning(selectedAttackerModel))) {
         checkModelCompat(); return;
     }
 

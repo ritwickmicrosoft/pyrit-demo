@@ -33,7 +33,7 @@ MODEL = "gpt-4o"
 
 # AI vs AI (T8): separate attacker & target models
 TARGET_MODEL = "gpt-4o"          # the model under test
-ATTACKER_MODEL = "gpt-5-mini"    # the adversarial attacker LLM
+ATTACKER_MODEL = "gpt-4o"        # attacker LLM (must be non-reasoning; reasoning models break multi-turn pipeline)
 
 # Model → (endpoint, uses_responses_api) mapping
 # Reasoning models (gpt-5-mini, o4-mini) need OpenAIResponseTarget
